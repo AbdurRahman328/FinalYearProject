@@ -202,7 +202,7 @@ y_test_original = min_max_inverse_transform(y_test, min_test, max_test)
 # Defining objective function for ARO
 
 def objective_function(solution):
-    neurons = int(solution[0])  # Number of neurons in LSTM layer
+    neurons = int(solution[0])  
     optimizer = solution[1]
     learning_rate = solution[2]
     batch_size = int(solution[3])
@@ -233,7 +233,7 @@ def objective_function(solution):
 	
 # Defining bounds for neurons, optimizer, learning rates and dropout rate
 	
-neurons_bounds = (10,200)  # Assuming a range for neurons (you can adjust this)
+neurons_bounds = (10,200)
 optimizers = ('Adam','Adagrad','Nadam')
 learning_rates = (0.001,0.1)
 batches = (8,32)
@@ -274,8 +274,8 @@ print("Batch Size : "+str(batch_size))
 	
 def objective_function(solution):
     neurons1 = int(solution[0])
-    neurons2 = int(solution[1]) # Number of neurons in LSTM layer
-    neurons3 = int(solution[2]) # Number of neurons in LSTM layer
+    neurons2 = int(solution[1]) 
+    neurons3 = int(solution[2])
     optimizer = solution[3]
     learning_rate = solution[4]
     batch_size = int(solution[5])
@@ -307,9 +307,9 @@ def objective_function(solution):
 
 # Defining bounds for neurons, learning rate, batch szie and dropout rate
 	
-neurons1_bounds = (10,200)  # Assuming a range for neurons (you can adjust this)
-neurons2_bounds = (10,200)  # Assuming a range for neurons (you can adjust this)
-neurons3_bounds = (10,200)  # Assuming a range for neurons (you can adjust this)
+neurons1_bounds = (10,200) 
+neurons2_bounds = (10,200)  
+neurons3_bounds = (10,200)  
 optimizers = ('Adam','Adagrad','Nadam')
 learning_rates = (0.001,0.1)
 batches = (8,32)
