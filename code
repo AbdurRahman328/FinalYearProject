@@ -1,0 +1,758 @@
+																								PACKAGES AND LIBRARIES
+
+import pandas as pd
+import numpy as np
+import math
+import matplotlib.pyplot as plt
+import seaborn as sns
+sns.set_theme(style="whitegrid")
+plt.style.use('ggplot')
+import tensorflow as tf
+import warnings
+import os
+import datetime as dt
+import tensorflow
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM
+from tensorflow.keras.layers import Dense
+from tensorflow.keras.layers import Dropout
+from tensorflow import keras
+from tensorflow.keras import optimizers
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+import numpy as np
+import time
+import math
+from keras.optimizers import Adam,Adagrad
+import mealpy
+mealpy.__version__
+from mealpy import FloatVar, ARO, StringVar, IntegerVar
+
+
+
+																										DATA PREPROCESSING
+
+data = pd.read_csv("D:\Final Year Project\Dataset\Proposed Paper Dataset\S&P 500\gspc_final.csv")
+data.head()
+
+data.drop(data.index[:49], inplace=True)
+data.reset_index(drop=True, inplace=True) # Reset index after dropping rows
+data['Date'] = pd.to_datetime(data['Date'], format='%d-%m-%Y')
+data['Date'] = data['Date'].dt.strftime('%Y-%m-%d')
+data.set_index("Date",inplace=True)
+data = data.fillna(data.mean())
+data.isna().sum()
+len(data) # 4397
+
+#Correlation heatmap
+fig = plt.figure(figsize= (10,5))
+sns.heatmap(data.corr(), annot=True)
+sns.set_style("whitegrid")
+plt.show()
+
+data = data.iloc[:, 1:]
+fig = plt.figure(figsize= (10,5))
+sns.heatmap(data.corr(), annot=True)
+sns.set_style("whitegrid")
+plt.show()
+
+#Denoising code
+from skimage.restoration import (denoise_wavelet, estimate_sigma)
+data['Close']= denoise_wavelet(data.iloc[:, 0], wavelet='haar',
+                                      method='VisuShrink',
+                                      mode='soft', rescale_sigma = True)
+data.head()
+
+
+
+																										EVALUATION METRIC
+def mean_absolute_percentage_error(y_true, y_pred):
+    return (np.mean(np.abs((y_true - y_pred)/(y_true))*100))
+
+def calculate_scores(y_true, y_pred):
+  mae = mean_absolute_error(y_true, y_pred)
+  mape = mean_absolute_percentage_error(y_true, y_pred)
+  mse = mean_squared_error(y_true, y_pred)
+  rmse = np.sqrt(mse)
+  R = np.corrcoef(y_true, y_pred)
+  r2 = r2_score(y_true, y_pred)
+  print(f"Mean Absolute Error (MAE): {mae:.4f}")
+  print(f"Mean Absolute Percentage Error (MAPE): {mape:.4f}")
+  print(f"Mean Squared Error (MSE): {mse:.4f}")
+  print(f"Root Mean Squared Error (RMSE): {rmse:.4f}")
+  print(f"R-Pearson Correlation Coefficient (R): {R[0,1]:.4f}")
+  print(f"R-squared (R2): {r2:.4f}")
+  dic = {'rmse':rmse, 'R': R[0,1], 'mape': mape}
+  return (dic)
+
+																										NECESSARY FUNCTIONS
+def DatasetCreation(dataset, time_step = 1):  
+   DataX, DataY = [], []
+   for i in range(len(dataset)- time_step -1):
+         a = dataset[i:(i+ time_step), ]
+         DataX.append(a)
+         DataY.append(dataset[i + time_step, 0]) 
+   return np.array(DataX), np.array(DataY)
+
+def data_split(data, split = 0.2):
+  l1   = int(len(data) * (1- split))
+  l2    = len(data) - l1
+  data1  = data.iloc[0:l1,:]
+  data2   = data.iloc[l1:len(data),:]
+  return data1, data2
+def min_max_transform(data, feature_range=(0, 1)):
+   scaler = MinMaxScaler(feature_range)
+   return scaler.fit_transform(data)
+
+def min_max_inverse_transform(data_scaled, min_original, max_original):
+    return min_original +  data_scaled*(max_original - min_original)
+
+	
+																									VISUALIZATION
+
+#Scatter Plot
+def true_pred_plot(model_output):
+
+  y_train = model_output['datasets']['y_train']
+  y_test =  model_output['datasets']['y_test']
+  train_pred = model_output['best_model']['train_predictions']
+  test_pred = model_output['best_model']['test_predictions']
+
+  fig = plt.figure(figsize= (14,5))
+  plt.subplot(121)
+  plt.scatter(y_train, train_pred, marker= "+", color = 'mediumblue')
+  identity_line = np.linspace(max(min(y_train), min(train_pred)), min(max(y_train), max(train_pred)))
+  plt.plot(identity_line, identity_line, color="red", linestyle="dashed", linewidth= 2.5)
+  plt.xlabel("True")
+  plt.ylabel("Predicted")
+  plt.title("Training data (a)")
+
+  plt.subplot(122)
+  plt.scatter(y_test, test_pred, marker = "+", color = 'mediumblue')
+  identity_line = np.linspace(max(min(y_test), min(test_pred)), min(max(y_test), max(test_pred)))
+  plt.plot(identity_line, identity_line, color="red", linestyle="dashed", linewidth= 2.5)
+  plt.xlabel("True")
+  plt.ylabel("Predicted")
+  plt.title("Test data (b)")
+  plt.suptitle("Scatter plot of True vs Predicted Close prices")
+  plt.show()
+	
+	
+#Line plot
+def best_model_prediction_plot(model_output):
+  time_step =  model_output['hyper_parameters']['time_step']
+  data = model_output['datasets']['data']
+  train_predict_plot_data = np.empty_like(data.values[:,0])# extracting closing price
+  train_predict_plot_data[:] = np.nan
+  test_predict_plot_data = np.empty_like(data.values[:,0])
+  test_predict_plot_data[:] = np.nan
+
+  fig = plt.figure(figsize = (14,5))
+  plt.subplot(121)
+  train_pred = model_output['best_model']['train_predictions']
+  test_pred = model_output['best_model']['test_predictions']
+  train_predict_plot_data[time_step:len(train_pred)+ time_step] =  train_pred
+  test_predict_plot_data[len(train_pred)+(time_step*2)+1:len(data.values)-1] = test_pred
+  plt.plot(data.values[:,0],'k', linewidth = 1.5)
+  plt.plot(train_predict_plot_data,'mediumblue',linewidth = 1.5)
+  plt.plot(test_predict_plot_data,'darkgreen',linewidth = 1.5)
+  plt.xlabel('')
+  plt.ylabel('Close price')
+  plt.title("(a)")
+  plt.legend(['True value', 'Predicted value in train set', 'Predicted value in test set'], loc = 'upper left')
+
+  plt.subplot(122)
+  plt.plot(data.values[len(train_pred)+(time_step*2)+1:-1, 0],'k',linewidth = 1.5)
+  plt.plot(test_pred,'darkgreen',linewidth = 1.5)
+  plt.xlabel('')
+  plt.ylabel('Close price')
+  plt.title("(b)")
+  plt.legend(['True value', 'Predicted value'], loc='upper left')
+
+def create_visualization(model_output):
+  true_pred_plot(model_output)
+  best_model_prediction_plot(model_output)
+
+
+																								ARO (Artifical Rabbit Optimization)
+
+train_data ,test_data  = data_split(data, 0.2)
+print("Total train data : ")
+print(len(train_data))
+print("No of data used for hyper-parametr tuning")
+train_data ,val_data  = data_split(train_data, 0.2)
+print("training data : ")
+print(len(train_data))
+print("validation data : ")
+print(len(val_data))
+# Scaling data
+min_train, max_train = train_data["Close"].min(), train_data["Close"].max()
+min_test, max_test = val_data["Close"].min(), val_data["Close"].max()
+train_data_scaled = min_max_transform(train_data)
+test_data_scaled = min_max_transform(val_data)
+
+X_train, y_train = DatasetCreation(train_data_scaled, 5)
+X_test, y_test = DatasetCreation(test_data_scaled, 5)
+num_features = train_data.shape[1]
+y_train_original = min_max_inverse_transform(y_train, min_train, max_train)
+y_test_original = min_max_inverse_transform(y_test, min_test, max_test)
+
+# Defining objective function for ARO
+
+def objective_function(solution):
+    neurons = int(solution[0])  # Number of neurons in LSTM layer
+    optimizer = solution[1]
+    learning_rate = solution[2]
+    batch_size = int(solution[3])
+
+    print("============================================= Running For  =============================================")
+
+    print("Values used are : (neurons, optimizer, learning rate, batch size)")
+    print(neurons)
+    print(optimizer)
+    print(learning_rate)
+    print(batch_size)
+
+    lstm_model = build_single_layer_LSTM(layers=[neurons], time_step= 5, num_features=num_features, optimizer=optimizer, learning_rate=learning_rate,verbose=0)
+    callback = tf.keras.callbacks.EarlyStopping(monitor='loss', patience= 5)
+    # Train the model using X_train and y_train
+    lstm_model.fit(X_train, y_train, epochs=50, batch_size=batch_size, callbacks=[callback],verbose=0)
+
+    ypred = min_max_inverse_transform(lstm_model.predict(X_test).ravel(), min_test, max_test)
+    ytest = min_max_inverse_transform(y_test, min_test, max_test)
+
+    mse =  np.mean((ytest - ypred)**2)
+    rmse = np.sqrt(mse)
+
+    print(f"Root Mean Squared Error (RMSE): {rmse:.4f}")
+    print("=============================================================================================")
+    return rmse
+
+	
+# Defining bounds for neurons, optimizer, learning rates and dropout rate
+	
+neurons_bounds = (10,200)  # Assuming a range for neurons (you can adjust this)
+optimizers = ('Adam','Adagrad','Nadam')
+learning_rates = (0.001,0.1)
+batches = (8,32)
+
+bound = (FloatVar(lb=neurons_bounds[0], ub=neurons_bounds[1], name="neurons"),
+         StringVar(valid_sets=optimizers, name="optimizer"),
+         FloatVar(lb=learning_rates[0], ub=learning_rates[1], name="learning_rate"),
+         FloatVar(lb=batches[0], ub=batches[1], name="batch_size"))
+
+
+problem_dict = {
+    "bounds": bound,
+    "obj_func": objective_function,
+    "minmax": "min",
+}
+
+model = ARO.IARO(epoch=2 pop_size=50) 
+best_hyperparameters = model.solve(problem_dict)
+
+print("Best Hyperparameters (Neurons, Optimizer, Learning Rate, Batch):", best_hyperparameters.solution)
+print(best_hyperparameters.solution)
+
+neurons = int(best_hyperparameters.solution[0])
+optimizer = int(best_hyperparameters.solution[1])
+learning_rate = round(best_hyperparameters.solution[2],4)
+batch_size = int(best_hyperparameters.solution[3])
+
+print("=======================================================")
+print("Best Hyper-parameters")
+print("=======================================================")
+print("LSTM Layer neurons : "+str(neurons))
+print("Optimizer : "+str(optimizer))
+print("Learning Rate : "+str(learning_rate))
+print("Batch Size : "+str(batch_size))
+	
+
+# Defining objective function for ARO (Multi Layer LSTM)
+	
+def objective_function(solution):
+    neurons1 = int(solution[0])
+    neurons2 = int(solution[1]) # Number of neurons in LSTM layer
+    neurons3 = int(solution[2]) # Number of neurons in LSTM layer
+    optimizer = solution[3]
+    learning_rate = solution[4]
+    batch_size = int(solution[5])
+    
+    print("============================================= Running For =============================================")
+
+    print("Values used are : (neurons1, neurons2, neurons3, optimizer, learning rate, batch size)")
+    print(neurons1)
+    print(neurons2)
+    print(neurons3)
+    print(optimizer)
+    print(learning_rate)
+    print(batch_size)
+
+    lstm_model = build_single_layer_LSTM(layers=[neurons1,neurons2,neurons3], time_step= 5, num_features=num_features, optimizer=optimizer, learning_rate=learning_rate,verbose=0)
+    callback = tf.keras.callbacks.EarlyStopping(monitor='loss', patience= 5)
+    # Train the model using X_train and y_train
+    lstm_model.fit(X_train, y_train, epochs=40, batch_size=batch_size, callbacks=[callback],verbose=0)
+
+    ypred = min_max_inverse_transform(lstm_model.predict(X_test).ravel(), min_test, max_test)
+    ytest = min_max_inverse_transform(y_test, min_test, max_test)
+
+    mse =  np.mean((ytest - ypred)**2)
+    rmse = np.sqrt(mse)
+
+    print(f"Root Mean Squared Error (RMSE): {rmse:.4f}")
+    print("=============================================================================================")
+    return rmse
+
+# Defining bounds for neurons, learning rate, batch szie and dropout rate
+	
+neurons1_bounds = (10,200)  # Assuming a range for neurons (you can adjust this)
+neurons2_bounds = (10,200)  # Assuming a range for neurons (you can adjust this)
+neurons3_bounds = (10,200)  # Assuming a range for neurons (you can adjust this)
+optimizers = ('Adam','Adagrad','Nadam')
+learning_rates = (0.001,0.1)
+batches = (8,32)
+
+bound = (FloatVar(lb=neurons1_bounds[0], ub=neurons1_bounds[1], name="neurons1"),
+         FloatVar(lb=neurons2_bounds[0], ub=neurons2_bounds[1], name="neurons2"),
+         FloatVar(lb=neurons3_bounds[0], ub=neurons3_bounds[1], name="neurons3"),
+         StringVar(valid_sets=optimizers, name="optimizer"),
+         FloatVar(lb=learning_rates[0], ub=learning_rates[1], name="learning_rate"),
+         FloatVar(lb=batches[0], ub=batches[1], name="batch_size"))
+
+problem_dict = {
+    "bounds": bound,
+    "obj_func": objective_function,
+    "minmax": "min",
+}
+
+model = ARO.IARO(epoch=1, pop_size=5) 
+best_hyperparameters = model.solve(problem_dict)
+
+print("Best Hyperparameters (Neurons-1, Neurons-2, Neurons-3, Optimizer, Learning Rate, Batch):", best_hyperparameters.solution)
+print(best_hyperparameters.solution)
+
+print("----------------------------------------------------")
+print("Min RMSE : ",best_hyperparameters.target.fitness)
+print("----------------------------------------------------")
+
+neurons1 = int(best_hyperparameters.solution[0])
+neurons2 = int(best_hyperparameters.solution[1])
+neurons3 = int(best_hyperparameters.solution[2])
+optimizer = int(best_hyperparameters.solution[3])
+learning_rate = round(best_hyperparameters.solution[4],4)
+batch_size = int(best_hyperparameters.solution[5])
+
+if optimizer == 0:
+  opt = 'Adam'
+elif optimizer == 1:
+  opt = 'Adagrad'
+elif optimizer == 2:
+  opt = 'Nadam'
+elif optimizer == 3:
+  opt = 'RMProps'
+else:
+  print("No optimizer found in the list(['Adam', 'Adagrad','Nadam'])!")
+
+
+print("=======================================================")
+print("Best Hyper-parameters")
+print("=======================================================")
+print("LSTM Layer-1 neurons : "+str(neurons1))
+print("LSTM Layer-2 neurons : "+str(neurons2))
+print("LSTM Layer-3 neurons : "+str(neurons3))
+print("Optimizer : " + str(opt))
+print("Learning Rate : "+str(learning_rate))
+print("Batch Size : "+str(batch_size))
+
+
+																							Building Single Layer Optimized Model
+
+from keras.optimizers import Adam,Adagrad,Nadam
+def build_single_layer_LSTM(layers, time_step, num_features, optimizer = 0, learning_rate = 0.001, verbose = 1):
+
+  model = Sequential()
+  model.add(LSTM(int(layers[0]), input_shape = (time_step, num_features)))
+  model.add(Dense(1, activation = 'linear'))
+  optimizer = int(optimizer)
+
+  if optimizer == 0:
+    opt = Adam(learning_rate = learning_rate)
+  elif optimizer == 1:
+    opt = Adagrad(learning_rate = learning_rate)
+  elif optimizer == 2:
+    opt = Nadam(learning_rate = learning_rate)
+  else:
+    print("No optimizer found in the list(['Adam', 'Adagrad','Nadam'])!")
+
+  model.compile(loss='mean_squared_error', optimizer= opt)
+
+  if verbose == 1:
+    print(model.summary())
+  return model
+	
+
+# Single Layer LSTM
+def single_layer_LSTM(neurons, hyper_parameters, data, time_step = 5, test_split = 0.2, epochs = 20,  num_replicates = 2):
+
+  print("Progress: Performing data preparation steps.......\n")
+  train_data, test_data = data_split(data, test_split)
+  num_features = train_data.shape[1]
+  min_train, max_train  = train_data["Close"].min(), train_data["Close"].max()
+  min_test, max_test   =  test_data["Close"].min(), test_data["Close"].max()
+  train_data_scaled  =  min_max_transform(train_data)
+  test_data_scaled   = min_max_transform(test_data)
+  X_train, y_train  =   DatasetCreation(train_data_scaled, time_step)
+  X_test, y_test    =   DatasetCreation(test_data_scaled, time_step)
+  y_train_original  =  min_max_inverse_transform(y_train, min_train, max_train)
+  y_test_original  =  min_max_inverse_transform(y_test, min_test, max_test)
+
+  print("Progress: Building and training models.......\n")
+
+  neurons = np.array(neurons)  
+  rmse_array = np.zeros((len(neurons), num_replicates))
+  mape_array = np.zeros((len(neurons), num_replicates))
+  R_array    = np.zeros((len(neurons), num_replicates))
+  elapsed_time_array = np.zeros((len(neurons), num_replicates))
+
+  
+  models_history = []
+  train_predictions = []
+  test_predictions  = []
+
+  for i in range(len(neurons)):
+
+    print("Model hyperparameters used: \n ", hyper_parameters[i])
+    model_history_per_replicate = []
+    train_predictions_per_replicate = []
+    test_predictions_per_replicate  = []
+    hidden_nodes = int(neurons[i])
+
+    for k in range(num_replicates):
+      print("Program is running for %d neurons and %d replicate ----->\n" %(hidden_nodes, k))
+      layers = [hidden_nodes]
+      model = build_model(layers, time_step, num_features, optimizer = hyper_parameters[i][0], learning_rate = hyper_parameters[i][1], verbose = 0)
+      callback = tf.keras.callbacks.EarlyStopping(monitor='loss', patience= 5)
+
+      start = time.time()
+      history = model.fit(X_train, y_train, batch_size = hyper_parameters[i][2], epochs= epochs, callbacks=[callback], verbose = 1)
+
+      model.save("optimized_single_layer_model_"+str(k)+".h5")
+    
+      plt.figure(figsize=(8, 5))
+      plt.plot(history.history['loss'])
+      plt.title('Epoch vs. Loss')
+      plt.xlabel('Epoch')
+      plt.ylabel('Loss')
+      plt.grid(True)
+      plt.show()
+    
+      end = time.time()
+      elapsed_time = end - start
+
+      model_history_per_replicate.append(history)
+
+      train_pred   =  min_max_inverse_transform(model.predict(X_train).ravel(), min_train, max_train)
+      test_pred    =  min_max_inverse_transform(model.predict(X_test).ravel(), min_test, max_test)
+
+      train_predictions_per_replicate.append(train_pred)
+      test_predictions_per_replicate.append(test_pred)
+      scores =   calculate_scores(min_max_inverse_transform(y_test, min_test, max_test),test_pred)
+      rmse_array[i][k] = scores['rmse']
+      mape_array[i][k] =  scores['mape']
+      R_array[i][k] = scores['R']
+      elapsed_time_array[i][k] = elapsed_time
+
+    models_history.append(model_history_per_replicate)
+    train_predictions.append(train_predictions_per_replicate)
+    test_predictions.append(test_predictions_per_replicate)
+
+  print("Progress: Collecting outputs.......\n")
+  neurons_df = pd.DataFrame(neurons)
+  rmse_df = pd.DataFrame(rmse_array)
+  mape_df  = pd.DataFrame(mape_array)
+  R_df    = pd.DataFrame(R_array)
+  elapsed_time_df =  pd.DataFrame(elapsed_time_array)
+  train_predictions  = np.array(train_predictions)
+  test_predictions   = np.array(test_predictions)
+  min_index = pd.DataFrame(rmse_df.min(axis = 1)).idxmin()[0]
+  min_col =   pd.DataFrame(rmse_df.min(axis = 0)).idxmin()[0]
+  num_neurons_with_best_rmse = neurons_df.loc[min_index,0]
+  best_rmse = rmse_df.loc[min_index, min_col]
+  mape_with_best_rmse = mape_df.loc[min_index, min_col]
+  R_with_best_rmse =  R_df.loc[min_index, min_col]
+  elapsed_time_with_best_rmse = elapsed_time_df.loc[min_index, min_col]
+
+  train_predictions_with_best_rmse = train_predictions[min_index][min_col]
+  test_predictions_with_best_rmse = test_predictions[min_index][min_col]
+  loss_with_best_rmse = models_history[min_index][min_col].history['loss']
+  
+  hyper_parameters = { 'neurons': neurons,
+                       'model_specific_hyper_parameters': hyper_parameters,#additional best_hyper_parmeters for each models
+                       'epochs': epochs,
+                       'time_step':time_step,
+                       'num_replicates': num_replicates,
+                       'test_split':test_split
+                        }
+
+  scores = {'neurons': neurons_df, 'rmse': rmse_df, 'mape': mape_df, 'R': R_df, 'elapsed_time': elapsed_time_df}
+  avg_scores = pd.DataFrame({'neurons': neurons,
+                            'rmse': rmse_df.mean(axis = 1),
+                            'mape': mape_df.mean(axis = 1),
+                            'R': R_df.mean(axis = 1),
+                            'elapsed_time': elapsed_time_df.mean(axis = 1)})
+
+  all_stds = pd.DataFrame({'neurons': neurons,
+                            'rmse': rmse_df.std(axis = 1),
+                            'mape': mape_df.std(axis = 1),
+                            'R': R_df.std(axis = 1),
+                            'elapsed_time': elapsed_time_df.std(axis = 1)})
+  all_minimums = pd.DataFrame({'neurons': neurons,
+                            'rmse': rmse_df.min(axis = 1),
+                            'mape': mape_df.min(axis = 1),
+                            'R': R_df.min(axis = 1),
+                            'elapsed_time': elapsed_time_df.min(axis = 1)})
+  all_maximums = pd.DataFrame({'neurons': neurons,
+                            'rmse': rmse_df.max(axis = 1),
+                            'mape': mape_df.max(axis = 1),
+                            'R': R_df.max(axis = 1),
+                            'elapsed_time': elapsed_time_df.max(axis = 1)})
+  model_with_best_rmse = {  'neurons': num_neurons_with_best_rmse,
+                            'replicate': min_col,
+                            'rmse': best_rmse,
+                            'mape': mape_with_best_rmse,
+                            'R':  R_with_best_rmse,
+                            'elapsed_time': elapsed_time_with_best_rmse,
+                            'train_predictions':train_predictions_with_best_rmse,
+                            'test_predictions': test_predictions_with_best_rmse,
+                            'loss':loss_with_best_rmse,
+
+                         }
+
+  datasets  =    {'data': data,
+                  'X_train': X_train,
+                  'X_test': X_test,
+                  'y_train': y_train_original,
+                  'y_test': y_test_original
+                  }
+
+  print("\nProgress: All works are done successfully, congratulations!!\n")
+  print("\nBest model (neurons, replicate, rmse): ", num_neurons_with_best_rmse, min_col, best_rmse)
+  print('\nAverage scores:\n', avg_scores)
+  print('\nStandard_deviations:\n', all_stds)
+  print('\nMinimums:\n', all_minimums)
+  print('\nMaximums:\n', all_maximums)
+  output_dictionary = { 'hyper_parameters': hyper_parameters,
+                        'best_model': model_with_best_rmse,
+                        'scores': scores,
+                        'avg_scores': avg_scores,
+                        'all_stds': all_stds,
+                        'all_minimums': all_minimums,
+                        'all_maximums': all_maximums,
+                        'train_predictions': train_predictions,
+                        'test_predictions':  test_predictions,
+                        'models_history': models_history,
+                        'datasets': datasets
+                       }
+
+  return (output_dictionary)
+
+	  
+#Calling Single Layer Optimized Model
+	
+neurons = 86
+optimizer = "Nadam"
+learning_rate = 0.001
+batch_size = 8
+
+neurons = np.array([neurons])
+best_hyper_parameters = [[optimizer, learning_rate, batch_size]]
+sl_model_output = single_layer_LSTM(neurons, best_hyper_parameters, data, time_step = 5, test_split = 0.2,
+                          epochs = 100, num_replicates = 15)
+create_visualization(sl_model_output)
+
+
+# Multi Layer LSTM
+	
+def multi_layer_LSTM_Model(layers, hyper_parameters, data, time_step = 5, test_split = 0.2, epochs = 5,  num_replicates = 2):
+
+    print("Progress: Performing data preparation steps.......\n")
+    train_data, test_data = data_split(data, test_split)
+    num_features = train_data.shape[1]
+
+    min_train, max_train  = train_data["Close"].min(), train_data["Close"].max()
+    min_test, max_test   =  test_data["Close"].min(), test_data["Close"].max()
+    train_data_scaled  =  min_max_transform(train_data)
+    test_data_scaled   = min_max_transform(test_data)
+
+
+    X_train, y_train  =   DatasetCreation(train_data_scaled, time_step)
+    X_test, y_test    =   DatasetCreation(test_data_scaled, time_step)
+    y_train_original  =  min_max_inverse_transform(y_train, min_train, max_train) #in original scale
+    y_test_original  =  min_max_inverse_transform(y_test, min_test, max_test) #in original scale
+    rmse_array = np.zeros(num_replicates)
+    mape_array = np.zeros(num_replicates)
+    R_array    = np.zeros(num_replicates)
+    elapsed_time_array = np.zeros(num_replicates)
+
+    models_history = []
+    train_predictions = []
+    test_predictions = []
+
+    for i in range(num_replicates):
+
+      print("Program is running for %d replicate ----->\n" %i)
+      model = build_model(layers, time_step, num_features, optimizer = hyper_parameters[0], learning_rate = hyper_parameters[1], verbose = 0)
+      callback = tf.keras.callbacks.EarlyStopping(monitor='loss', patience= 5)
+      start = time.time()
+      history = model.fit(X_train, y_train, batch_size = hyper_parameters[2], epochs= epochs, callbacks=[callback], verbose = 1)
+      end = time.time()
+      elapsed_time = end - start
+      models_history.append(history)
+      train_pred   =  min_max_inverse_transform(model.predict(X_train).ravel(), min_train, max_train) #in original scale
+      test_pred    =  min_max_inverse_transform(model.predict(X_test).ravel(), min_test, max_test)
+      train_predictions.append(train_pred)
+      test_predictions.append(test_pred)
+      scores =   calculate_scores(min_max_inverse_transform(y_test, min_test, max_test),test_pred)
+      rmse_array[i] =  scores['rmse']
+      mape_array[i] =  scores['mape']
+      R_array[i] = scores['R']
+      elapsed_time_array[i] = elapsed_time
+
+    min_index = rmse_array.argmin()
+    best_rmse = rmse_array[min_index]
+    mape_with_best_rmse = mape_array[min_index]
+    R_with_best_rmse =  R_array[min_index]
+    elapsed_time_with_best_rmse = elapsed_time_array[min_index]
+
+    train_predictions_with_best_rmse = train_predictions[min_index]
+    test_predictions_with_best_rmse = test_predictions[min_index]
+    loss_with_best_rmse = models_history[min_index].history['loss']
+    all_scores = {'rmse': rmse_array, 'mape': mape_array, 'R': R_array, 'elapsed_time': elapsed_time_array}
+
+    avg_scores = {'rmse': np.mean(rmse_array),
+                  'mape': np.mean(mape_array),
+                  'R': np.mean(R_array),
+                  'elapsed_time': np.mean(elapsed_time_array)}
+    stds = {'rmse': np.std(rmse_array),
+              'mape': np.std(mape_array),
+                  'R': np.std(R_array),
+                  'elapsed_time': np.std(elapsed_time_array)}
+    minimums = {'rmse': np.min(rmse_array),
+                'mape': np.min(mape_array),
+                'R': np.min(R_array),
+                'elapsed_time': np.min(elapsed_time_array)}
+    maximums = {'rmse': np.max(rmse_array),
+                'mape': np.max(mape_array),
+                'R': np.max(R_array),
+                'elapsed_time': np.max(elapsed_time_array)}
+    model_with_best_rmse = {
+                            'replicate': min_index,
+                            'rmse': best_rmse,
+                            'mape': mape_with_best_rmse,
+                            'R':  R_with_best_rmse,
+                            'elapsed_time': elapsed_time_with_best_rmse,
+                            'train_predictions':train_predictions_with_best_rmse,
+                            'test_predictions': test_predictions_with_best_rmse,
+                            'loss':loss_with_best_rmse,
+                         }
+    hyper_parameters = {'layers': layers,
+                        'model_specific_hyper_parameters': hyper_parameters,#additional best_hyper_parmeters for each models
+                       'epochs': epochs,
+                       'time_step':time_step,
+                       'num_replicates': num_replicates,
+                       'test_split':test_split
+                        }
+    datasets  =   {'data': data,
+                  'X_train': X_train,
+                  'X_test': X_test,
+                  'y_train': y_train_original,
+                  'y_test': y_test_original
+                  }
+    output_dictionary = {'hyper_parameters': hyper_parameters,
+                        'best_model': model_with_best_rmse,
+                        'all_scores': all_scores,
+                        'avg_scores': avg_scores,
+                        'standard deviations': stds,
+                        'minimums': minimums,
+                        'maximums': maximums,
+                        'train_predictions': train_predictions,
+                        'test_predictions':  test_predictions,
+                        'datasets': datasets
+                       }
+
+    return output_dictionary
+
+
+
+def run_multi_layer_LSTM_Model(hidden_layers, hyper_parameters, data, time_step = 5, test_split = 0.2, epochs = 5,  num_replicates = 2):
+  num_models = len(hidden_layers)
+  rmse = []
+  mape = []
+  R = []
+  elapsed_time = []
+  avg_rmse = []
+  avg_mape = []
+  avg_R = []
+  avg_elapsed_time = []
+  best_avg_rmse = 99999999999
+  best_rmse = 99999999999
+  best_model_hidden_layers = None
+  best_model_output = None
+
+  for i in range(num_models):
+    print("Running model with hidden neurons: ", hidden_layers[i])
+    print("\n")
+    print("Best Hyper_parameters used: ", hyper_parameters[i])
+    print("\n")
+    output = multi_layer_LSTM_Model(hidden_layers[i], hyper_parameters[i], data, time_step, test_split, epochs, num_replicates)
+
+    rmse.append(output['all_scores']['rmse'])
+    mape.append(output['all_scores']['mape'])
+    R.append(output['all_scores']['R'])
+    elapsed_time.append(output['all_scores']['elapsed_time'])
+    avg_rmse.append(output['avg_scores']['rmse'])
+    avg_mape.append(output['avg_scores']['mape'])
+    avg_R.append(output['avg_scores']['R'])
+    avg_elapsed_time.append(output['avg_scores']['elapsed_time'])
+
+    if avg_rmse[i] < best_avg_rmse:
+      best_avg_rmse = avg_rmse[i]
+      best_rmse = output['best_model']['rmse']
+      best_model_hidden_layers = hidden_layers[i]
+      best_model_output = output
+
+  rmse = np.array(rmse)
+  mape = np.array(mape)
+  R =  np.array(R)
+  scores = {'layers': hidden_layers, 'rmse': rmse, 'mape': mape, 'R':R, 'elapsed_time': elapsed_time}
+  avg_scores = pd.DataFrame({'layers': hidden_layers, 'rmse': np.array(avg_rmse), 'mape': np.array(avg_mape), 'R':np.array(avg_R), 'elapsed_time':np.array(avg_elapsed_time)})
+  stds = pd.DataFrame({'layers': hidden_layers, 'rmse': np.std(rmse, axis = 1), 'mape': np.std(mape, axis = 1), 'R':  np.std(R, axis = 1 ),  'elapsed_time': np.std(elapsed_time, axis = 1 )})
+  minimums = pd.DataFrame({'layers': hidden_layers, 'rmse': np.min(rmse, axis =1 ), 'mape': np.min(mape, axis= 1), 'R': np.min(R, axis =1), 'elapsed_time': np.min(elapsed_time, axis =1)})
+  maximums = pd.DataFrame({'layers': hidden_layers, 'rmse': np.max(rmse, axis =1), 'mape': np.max(mape, axis =1), 'R': np.max(R, axis =1),  'elapsed_time': np.max(elapsed_time,axis =1)})
+
+  output_dictionary = {
+                     'hyper_parameters': hyper_parameters[i],
+                     'scores': scores,
+                     'avg_scores': avg_scores,
+                     'stds':stds,
+                     'minimums': minimums,
+                     'maximums': maximums,
+                      'best_avg_rmse': best_avg_rmse,
+                      'best_rmse': best_rmse,
+                      'best_model_hidden_layers': best_model_hidden_layers,
+                      'best_model_output': best_model_output
+                      }
+  print("\nBest model and its avg rmse and minimum rmse):\n", best_model_hidden_layers, best_avg_rmse, best_rmse)
+  print('\nAverage scores:\n', avg_scores)
+  print('\nStandard_deviations:\n', stds)
+  print('\nMinimums:\n', minimums)
+  print('\nMaximums:\n', maximums)
+  return output_dictionary
+
+	
+#Calling Multi Layer Optimized Model
+hidden_layers = [[40, 10], [10, 10, 45]]
+best_hyper_parameters_multilayers  = [['Adam', 0.0201, 8],
+                                     ['Adam', 0.0115, 9]]
+ml_model_output = run_multi_layer_LSTM_Model(hidden_layers, best_hyper_parameters_multilayers, data, time_step = 5, test_split = 0.2, epochs = 100,  num_replicates = 15)
+
