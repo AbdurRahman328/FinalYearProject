@@ -86,7 +86,8 @@ def calculate_scores(y_true, y_pred):
   dic = {'rmse':rmse, 'R': R[0,1], 'mape': mape}
   return (dic)
 
-																										NECESSARY FUNCTIONS
+NECESSARY FUNCTIONS
+
 def DatasetCreation(dataset, time_step = 1):  
    DataX, DataY = [], []
    for i in range(len(dataset)- time_step -1):
@@ -109,7 +110,7 @@ def min_max_inverse_transform(data_scaled, min_original, max_original):
     return min_original +  data_scaled*(max_original - min_original)
 
 	
-																									VISUALIZATION
+VISUALIZATION
 
 #Scatter Plot
 def true_pred_plot(model_output):
@@ -175,7 +176,7 @@ def create_visualization(model_output):
   best_model_prediction_plot(model_output)
 
 
-																								ARO (Artifical Rabbit Optimization)
+ARO (Artifical Rabbit Optimization)
 
 train_data ,test_data  = data_split(data, 0.2)
 print("Total train data : ")
@@ -366,7 +367,7 @@ print("Learning Rate : "+str(learning_rate))
 print("Batch Size : "+str(batch_size))
 
 
-																							Building Single Layer Optimized Model
+Building Single Layer Optimized Model
 
 from keras.optimizers import Adam,Adagrad,Nadam
 def build_single_layer_LSTM(layers, time_step, num_features, optimizer = 0, learning_rate = 0.001, verbose = 1):
