@@ -1,4 +1,4 @@
-																								PACKAGES AND LIBRARIES
+PACKAGES AND LIBRARIES
 
 import pandas as pd
 import numpy as np
@@ -30,7 +30,7 @@ from mealpy import FloatVar, ARO, StringVar, IntegerVar
 
 
 
-																										DATA PREPROCESSING
+DATA PREPROCESSING
 
 data = pd.read_csv("D:\Final Year Project\Dataset\Proposed Paper Dataset\S&P 500\gspc_final.csv")
 data.head()
@@ -65,7 +65,8 @@ data.head()
 
 
 
-																										EVALUATION METRIC
+EVALUATION METRIC
+
 def mean_absolute_percentage_error(y_true, y_pred):
     return (np.mean(np.abs((y_true - y_pred)/(y_true))*100))
 
